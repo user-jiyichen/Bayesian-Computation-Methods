@@ -1,0 +1,216 @@
+---
+title: "Untitled"
+author: "Yichen Ji"
+date: "30/10/2021"
+output: html_document
+---
+
+```{r}
+# Some distance functions
+
+abs_diff = function(x,y){return(abs(x-y))}
+
+square_diff = function(x,y){return((x-y)^2)}
+
+KL_div = function(x,y){return(x * log(x/y))}
+```
+
+```{r}
+##################### ABC with rejection sampler ############################
+# 太他妈的慢了，而且除了beta0其他参数的均值都离谱
+
+# containers to store summary statistics and accepted 
+summary_y = c()
+accepted_beta = data.frame()
+
+for (i in (1:num_sim)){
+  repeat{
+    # generate parameters from the prior
+    simulate_beta = c(rmvnorm(1, mean = c(0,0,0,0,0)))
+    # generate artificial data from the likelihood
+    zi= sim_logistic_data(dim_data, simulate_beta)
+    
+    # use summation/count as the summary statistic
+    summary_stat = function(x){sum(x)}
+  
+    # set tolerance level = 0.01
+    if (sqrt_diff(zi, y0) <= 2){
+      break
+    }
+  }
+  accepted_beta = rbind(accepted_beta, simulate_beta)
+}
+
+colnames(accepted_beta) = c('beta0', 'beta1', 'beta2', 'beta3', 'beta4')
+accepted_beta
+```
+
+```{r,echo=FALSE}
+# rejection-ABC
+posterior = data.frame()
+
+for (i in (1:num_sim)){
+  repeat{
+    # generate parameters from the prior
+    beta = c(rmvnorm(1, mean = c(0,0,0,0,0)))
+    
+    # generate artificial data from the likelihood
+    simulated_data= sim_logistic_data(dim_data, beta)
+  
+    # set tolerance level
+    if (sum(simulated_data == observed_data)/length(observed_data) >=0.9){
+      break
+    }
+  }
+  posterior = rbind(posterior, beta)
+}
+```
+
+```{r}
+# target data y
+data =  rnorm(100, mean = 4.3, sd = 2.7) 
+
+# Algo3: Likelihood-free MCMC sampler
+run_MCMC_ABC = function(iterations, eps = 0.1){
+  
+  # create a container of 2 parameters
+  # note: the number of rows of 'chain' is (iterations + 1) since the first is the initial value theta_0
+  chain = array(dim = c(iterations + 1, 1)) 
+  
+  # set initial values
+  chain[1] = theta0[1]
+  
+  for(i in 2: iterations + 1){
+    # QUESTION: can we apply the realization parameter on other forms of density?
+    #           the target distribution is Normal, then the Markov kernel should be Normal as well?
+    
+    # draw parameters from Normal Markov kernel q
+    theta = rnorm(1, mean = chain[i - 1], sd = 2.7) 
+# QUESTION: should we use a multi-variate or uni-variate distribution as the Markov kernel?
+  
+    # draw samples z' from the likelihood f as a Normal distribution with parameter theta
+    samples = rnorm(100, mean = theta, sd = 2.7)
+    
+    # draw a sample from Uniform[0,1]
+    u = runif(1,0,1)
+    
+    # use absolute difference as the distance between observed and actual summary statistics
+    # use mean and variance as summary statistics
+    diffmean = abs(mean(samples) - mean(data))
+    diffstd = abs(sd(samples) - sd(data))
+    
+    # evaluate the acceptance rate
+    acceptance_rate = (dnorm(theta) * dnorm(chain[i - 1], mean = theta, sd = 2.7)) /
+      (dnorm(chain[i - 1]) * dnorm(theta, mean = chain[i - 1], sd = 2.7))
+      
+    # accept or not
+    if ((diffmean <= eps) & (u <= acceptance_rate))
+      chain[i] = theta
+
+    else
+      {chain[i] = chain[i-1]}
+  }
+  return(chain[-1])
+}
+
+
+```
+
+
+
+3. MCMC-ABC in the first paper
+
+```{r}
+# ABC rejection sampler with uniform prior and Binomial real data
+# the posterior is a function of probability parameter, denoted as theta
+# posterior is also Binomial by conjugacy
+
+# Algo 2
+epsilon = 0.01 # threshold
+N = 100 # number of iterations
+
+# real data with sample size = 100
+y = rbinom(n = 100, size = 10, prob = 0.4) 
+
+posterior = rep(NA, N)
+
+i=1
+while (i <= N){
+  candidate = runif(1) 
+  z = rbinom(100, size = 10, prob=candidate)
+  summary_stat = function(x){mean(x)}
+  if (square_diff(summary_stat(z), summary_stat(y)) <= epsilon){
+    posterior[i] = candidate
+    i = i+1
+  }
+}
+
+plot(dbinom(1:10, 10, 0.4) , type = "h", lwd = 2, col = 'black',
+     xlab = 'Number of Success', ylab = 'P(X=x)',
+     main = "Binomial probability function")
+
+lines(dbinom(1:10, 10, prob = sample(posterior,1)), type = 'p', col = 'red')
+```
+
+```{r}
+# ABC-MCMC sampler: Algo 3
+# beta Markov kernel, binomial likelihood, and beta posterior
+# the parameter of interest is still the probability of success
+
+
+# initial realization (theta0, z0)
+theta0 = posterior[-1]
+z0 = rbinom(100, 10, theta0)
+
+# setup
+epsilon = 5
+y = rbinom(n = 100, size = 10, prob = 0.4) 
+N = 100
+thetalist = rep(NA, N+1)
+thetalist[1] = theta0
+zlist = vector('list', N+1)
+zlist[1] = list(z0)
+
+for(t in 2:100){
+  theta_candidate = rbeta(1, shape1 = 1, shape2 = thetalist[t-1] )
+  z = rbinom(100, size = 10, prob = theta_candidate)
+  u = runif(1)
+  
+  summary_stat = function(x){mean(x)}
+  
+  metric = abs_diff(summary_stat(z),summary_stat(y))
+  
+  numerator = dunif(theta_candidate)* dbeta(thetalist[t-1], shape1 = 1, shape2 = theta_candidate)
+  denominator = dunif(thetalist[t-1]) * dbeta(theta_candidate, shape1 = 1, shape2 = thetalist[t-1])
+  accept_rate = exp(log(numerator) - log(denominator))
+  if (metric<= epsilon & u <= accept_rate){
+  thetalist[t] = theta_candidate
+  zlist[t] = list(z)
+}
+  else{
+  thetalist[t] = thetalist[t-1]
+  zlist[t] = list(zlist[t-1])
+  }
+}
+
+```
+
+```{r}
+zlist[2] = list(z)
+zlist[1]
+```
+
+```{r}
+theta_candidate = rbeta(1, shape1 = 1, shape2 = thetalist[1] )
+z = rbinom(100, size = 10, prob = theta_candidate)
+numerator = dunif(theta_candidate)* dbeta(thetalist[1], shape1 = 1, shape2 = theta_candidate)
+denominator = dunif(thetalist[1]) * dbeta(theta_candidate, shape1 = 1, shape2 = thetalist[1])
+accept_rate = exp(log(numerator) - log(denominator))
+metric = abs_diff(summary_stat(z),summary_stat(y))
+u = runif(1)
+metric
+accept_rate
+theta_candidate
+z
+(metric <= epsilon) & (u <= accept_rate)
+```

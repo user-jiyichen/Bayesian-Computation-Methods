@@ -1,0 +1,446 @@
+---
+title: "ABC"
+author: "Yichen Ji"
+date: "25/09/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# clear the environment
+rm(list = ls())
+```
+
+### Codes following STA3431: MCMC by prof. Rosenthal
+
+link: http://probability.ca/jeff/teaching/2122/sta3431/notespost.pdf
+```{r}
+N = 10000
+y = rep(NA,N)
+theta = runif(N)
+
+for (i in 1: N){
+  y[i] = rbinom(1, 10, theta[i])
+}
+
+plot(y, theta)
+
+data = data.frame(theta, y)
+ggplot(data, aes(x = theta)) + geom_histogram(binwidth = 0.02) + facet_wrap(~y, ncol = 4)
+```
+
+MCMC: use pseudo randomness on a computer to simulate and hence estimate importmant quantities
+```{r}
+# estimate E[Z^4 * cos(Z)] where Z~Normal(0,1)
+
+for(i in 1:3){
+  for (n in c(1000,10000,100000,1000000)){
+    Z = rnorm(n)
+    X = Z^4 * cos(Z)
+    m = mean(X)
+    se = sd(X)/sqrt(n)
+    cat("MC:  ", m, " +- ", se, "  (n=", n, ")", "\n", sep='')  # \n is "newline"
+
+    # compute an approximate 95% confidence interval
+    cat("  95% C.I.:  (", m-1.96*se, ",", m+1.96*se, ")\n", sep='')
+
+  }
+}
+```
+
+
+```{r}
+# double-exponential (Laplace) distribution
+doubleexp = function(){
+  if(runif(1)<0.5) return(-log(runif(1)))
+  else return(log(runif(1)))
+}
+doubleexp()
+
+# Monte Carlo Integration g(x,y) = cos(sqrt(x*y)) integrate over (0,1) for both x and y
+g = function(x,y){cos(sqrt(x*y))}
+M = 100000
+xlist = runif(M)
+ylist = runif(M)
+funclist = g(xlist,ylist)
+print(mean(funclist))
+print(sd(funclist)/sqrt(M))
+```
+- Unnormalized densities integration example: 
+
+Suppose to compute $I = E[Y^2]$ where Y has density $cy^3sin(y^4)cos(y^5)$. We have $g(y) =y^3sin(y^4)cos(y^5)$ and $h(y) = y^2$ which is our interest. Let $f(y) = 6y^5$ and we know that $X \sim f \ if \  X=U^{1/6} where \  U \sim Unif[0,1]$
+
+```{r}
+M = 10^6
+uniflist = runif(M)
+xlist = uniflist^(1/6)
+numerator = sin(xlist^4) * cos(xlist*5)
+denominator = sin(xlist^4) * cos(xlist^5) / xlist^2
+print(mean(numerator) / mean(denominator))
+```
+
+Accept-Reject Sampler:
+
+Suppose $\pi = g = N(0,1)$ i.e. $g(x)=\pi(x)=(2\pi)^{-1/2}exp(-x^2/2)$ and we want $E_{\pi}[X^4]$ i.e. $h(x)=x^4$. Let $f(x)=0.5e^{-|x|}$ and K=8
+```{r}
+# Rejection Sampler
+
+g = function(x) { dnorm(x) }
+f = function(x) { 1/2 * exp(-abs(x)) }
+h = function(x){return(x^4)}
+K = 6
+Kf = function(x) { K * f(x) }
+M = 10000 # number of attempts
+xlist = hlist = fulllist = rep(NA, M)
+numsamples = 0
+for (i in 1:M){
+  X = doubleexp()
+  fulllist[i] = X
+  U = runif(1)
+  alpha = g(X) / Kf(X)
+  if (U < alpha){
+    xlist[i] = X
+    hlist[i] = h(X)
+    numsamples = numsamples + 1
+  }
+}
+
+cat("Out of", M, "attempts, obtained", numsamples, "samples\n")
+cat("mean of X is about", mean(xlist, na.rm=TRUE), "\n")
+
+se =  sd(xlist, na.rm=TRUE) / sqrt(numsamples)
+cat("standard error of X is about", se, "\n")
+
+cat("mean of h(X) is about", mean(hlist, na.rm=TRUE), "\n")
+se =  sd(hlist, na.rm=TRUE) / sqrt(numsamples)
+cat("standard error of h(X) is about", se, "\n")
+
+plot( fulllist, rep(0,M), pch="|", ylim=c(-1,2) )
+points(xlist, rep(0.2,M), col="red", pch="|")
+```
+```{r}
+# auxiliary variable rejection sampling example 这里还没明白原理
+
+g = function(y) { y^3 * sin(y^4) * cos(y^5) };
+M = 10^4;
+
+xlist = runif(M);
+ylist = runif(M);
+pilist = xlist[ylist < g(xlist)];
+len = length(pilist);
+cat("Obtained", len, "samples out of", M, "attempts.\n");
+
+hlist = pilist^2;
+cat("E(h) estimate: ", mean(hlist), "+-", sd(hlist)/sqrt(len), "\n");
+
+plot(xlist,ylist, pch=".")
+plot(g,add=TRUE, col="red")
+points(xlist[ylist < g(xlist)],ylist[ylist < g(xlist)],col="green",pch=".")
+points(xlist[ylist < g(xlist)],
+	rep(0, length(ylist[ylist < g(xlist)])), col="blue", pch="|")
+```
+
+
+
+```{r}
+# M-H example of the previous function g(y) = y^3 * sin(y^4) * cos(y^5) and h(y) = y^2
+g = function(y){
+  if ((y<0)||(y>1))
+    return(0)
+  else
+    return(y^3 * sin(y^4) * cos(y^5))
+}
+
+h = function(y){return(y^2)}
+
+M = 11000 # run length
+B = 1000 # amount of burn-in
+X = runif(1) # over-dispersed starting distribution
+sigma = 1 # proposal scaling
+xlist = rep(0,M) # keep track of chain values
+hlist = rep(0,M) # keep track of h function values
+numaccept = 0
+
+for (i in 1:M){
+  Y = X + sigma + rnorm(1) # proposal value
+  U = runif(1)
+  alpha = g(Y) / g(X)
+  if (U< alpha){
+    X = Y # accept proposal
+    numaccept = numaccept + 1
+  }
+  xlist[i] = X
+  hlist[i] = h(X)
+}
+
+
+cat("ran Metropolis algorithm for", M, "iterations, with burn-in", B, "\n");
+cat("acceptance rate =", numaccept/M, "\n");
+u = mean(hlist[(B+1):M])
+cat("mean of h is about", u, "\n")
+
+se1 =  sd(hlist[(B+1):M]) / sqrt(M-B)
+cat("iid standard error would be about", se1, "\n")
+
+varfact <- function(xxx) { 2 * sum(acf(xxx, plot=FALSE)$acf) - 1 }
+thevarfact = varfact(hlist[(B+1):M])
+se = se1 * sqrt( thevarfact )
+cat("varfact = ", thevarfact, "\n")
+cat("true standard error is about", se, "\n")
+cat("approximate 95% confidence interval is (", u - 1.96 * se, ",",
+						u + 1.96 * se, ")\n\n")
+
+plot(xlist, type='l')
+acf(xlist)
+```
+
+
+
+
+Generative models: 
+- Generate new data instances
+- Include the distribution of the data itself
+- A model of the conditional probability of the observed X given a target y i.e. P(X|Y = y) by learning the joint distribution and then predicts the conditional probability with the help of Bayes theorem.
+
+## MCMC Algos Computation
+Write the codes following this tutorial: https://rpubs.com/boussau/BasicABC
+
+### 1. Accept-Rejection Sampling
+
+```{r}
+# real Beta(6,3) density
+a = 6
+b = 3
+x = seq(0,1,0.01) # points from 0 to 1 by 0.01 increment
+
+# A-R simulation
+T = 100000 # number of random draws
+theta = rep(NA, T) # a vector container
+c = 3 # re-scale coefficient
+
+for (t in 1:T){
+  z = runif(1,0,1) # generate z from the proposed distribution
+  u = runif(1,0,1) # generate u from Uniform(0,1)
+  r = dbeta(z,a,b)/(c * dunif(z)) # accept prob
+  if (u <= r){ 
+    theta[t] <- z
+  }
+  else{
+    next
+  }
+}
+
+```
+
+```{r}
+hist(theta, breaks = 100, freq = FALSE, main = 'Random draws from beta(6, 3)')
+lines(x, dbeta(x,a,b))
+cat("Mean is equal to", a / (a+b),'\n',"Standard deviation is equal to", 
+    sqrt((a*b)/((a+b)^2 * (a+b+1))),'\n')
+cat("Estimated mean is equal to", mean(theta, na.rm=TRUE),'\n',"Standard deviation is equal to", sd(theta, na.rm=TRUE))
+```
+
+```{r}
+library(ggplot2)
+```
+
+```{r}
+# A more efficient way to write so
+z = runif(T,0,1)
+u = runif(T,0,1)
+r = dbeta(z,a,b) / (c * dunif(z))
+accept = (u<=r)
+d = data.frame(theta = z, accept = factor(accept, levels = c('FALSE','TRUE')))
+ggplot(d, aes(x = theta, fill = accept)) + geom_histogram(binwidth = 0.01)
+```
+
+
+```{r}
+# consider the Normal distribution case
+
+# helper functions that are used in the for loop
+
+number_of_data_points = 100
+data =  rnorm(number_of_data_points, mean = 4.3, sd = 2.7)
+summary(data)
+# uniform prior
+draw_mu = function(){
+  return(runif(1, min = 0, max = 10))
+}
+draw_sigma = function(){
+  return(runif(1, min = 0, max = 10))
+}
+
+# data simulation function
+simulate_data <- function (number_of_data_points, mu, sigma) { 
+  return(rnorm(number_of_data_points, mean = mu, sd = sigma))
+}
+
+
+
+# comparison method 1: squared_distance of quantiles
+compute_quantiles <- function(data) {
+  return (quantile(data, probs=c(0.1, 0.5, 0.9)))
+}
+# First method to compare a simulated sample to the observed data
+compare_quantiles_with_squared_distance <- function (true, simulated) {
+  distance = sqrt(sum(mapply(function(x,y) (x-y)^2, true, simulated)))
+  return(distance)
+}
+
+# Second method to compare a simulated sample to the observed data
+compare_quantiles_with_median_and_spread <- function (true_quantiles, simulated_quantiles) {
+  distances=vector(length=2, mode="numeric")
+  distances[1] <- abs(true_quantiles[2]-simulated_quantiles[2])
+  true_spread <- true_quantiles[3]-true_quantiles[1]
+  simulated_spread <- simulated_quantiles[3]-simulated_quantiles[1]
+  distances[2] <- abs(true_spread - simulated_spread)
+  return(distances)
+}
+# Third method to compare a simulated sample to the observed data
+compare_distributions_with_mean_and_variance <-function (true, simulated) {
+  # comparison with the observed summary statistics
+  diffmean <- abs(mean(true) - mean(simulated))
+  diffsd <- abs(sd(true) - sd(simulated))
+  return(c(diffmean, diffsd))
+}
+
+# Accept or reject based on the second method to compare a simulated sample to the observed data
+accept_or_reject_with_median_and_spread <- function (true, simulated, acceptance_threshold) {
+  distances = compare_quantiles_with_median_and_spread(compute_quantiles(true), compute_quantiles(simulated))
+  if((distances[1] < acceptance_threshold) & (distances[2] < 4*acceptance_threshold) ) return(TRUE) else return(FALSE)
+}
+# Accept or reject based on the third method to compare a simulated sample to the observed data
+accept_or_reject_with_mean_variance <- function (true, simulated, acceptance_threshold) {
+  differences = compare_distributions_with_mean_and_variance(true, simulated)
+  if((differences[1] < acceptance_threshold) & (differences[2] < 2*acceptance_threshold)) return(TRUE) else return(FALSE)
+}
+
+# a function to accept or reject a sample based on its distance to the observed data (in one go)
+accept_or_reject_with_squared_distance <- function (true, simulated, acceptance_threshold) {
+  distance = compare_quantiles_with_squared_distance(compute_quantiles(true), compute_quantiles(simulated))
+  if((distance < acceptance_threshold) ) return(TRUE) else return(FALSE)
+}
+
+accept_or_reject_with_squared_distance(true = data, simulated = simulate_data(100, 4, 3), 0.9)
+```
+
+```{r}
+# full accept-rejection sampler after applying all the previous helper functions
+
+sample_by_rejection <- function (true_data, n_iterations, acceptance_threshold, accept_or_reject_function) {
+  
+  number_of_data_points = length(true_data)
+  
+  accepted_or_rejected <- vector(length = n_iterations)
+  sampled_mus <- vector(length = n_iterations, mode = "numeric")
+  sampled_sigmas <- vector (length = n_iterations, mode = "numeric")
+# 3 containers
+  
+  for (i in 1:n_iterations){
+    mu <- draw_mu()
+    sigma <- draw_sigma()
+    parameters = list("mu"=mu, "sigma"=sigma)
+    simulated_data <- simulate_data(number_of_data_points, mu, sigma)
+    accepted_or_rejected[i] = accept_or_reject_function(true_data, simulated_data, acceptance_threshold)
+    sampled_mus[i] = mu
+    sampled_sigmas[i] = sigma
+  }
+  return(data.frame(cbind("accepted_or_rejected" = accepted_or_rejected, "sampled_mus" = sampled_mus, "sampled_sigmas" = sampled_sigmas)))
+}
+```
+
+```{r}
+# Performance
+sampled_parameter_values_suqared_distances = sample_by_rejection(data, 200000, 0.5, accept_or_reject_with_squared_distance)
+
+sampled_parameter_values_median_and_spread = sample_by_rejection(data, 200000, 0.1, accept_or_reject_with_median_and_spread)
+
+sampled_parameter_values_mean_and_variance = sample_by_rejection(data, 200000, 0.1, accept_or_reject_with_mean_variance)
+```
+
+```{r}
+# the number of samples being accepted out of 200000
+sum(sampled_parameter_values_suqared_distances$accepted_or_rejected)
+
+sum(sampled_parameter_values_median_and_spread$accepted_or_rejected)
+
+sum(sampled_parameter_values_mean_and_variance$accepted_or_rejected)
+```
+
+```{r}
+library(coda)
+```
+
+```{r}
+rej_samples_squared_distances_as_mcmc = mcmc(sampled_parameter_values_suqared_distances[which(sampled_parameter_values_suqared_distances$accepted_or_rejected == 1), c(2,3)])
+
+summary(rej_samples_squared_distances_as_mcmc)
+```
+
+```{r}
+plot(rej_samples_squared_distances_as_mcmc)
+
+autocorr.plot((rej_samples_squared_distances_as_mcmc))
+# no correlation between subsequent 
+```
+
+
+```{r}
+rej_samples_median_and_spread_as_mcmc = mcmc(sampled_parameter_values_median_and_spread[which(sampled_parameter_values_median_and_spread$accepted_or_rejected==1),c(2,3)])
+
+summary(rej_samples_median_and_spread_as_mcmc)
+
+rej_samples_mean_and_variance_as_mcmc = mcmc(sampled_parameter_values_mean_and_variance[which(sampled_parameter_values_mean_and_variance$accepted_or_rejected==1),c(2,3)])
+
+summary(rej_samples_mean_and_variance_as_mcmc)
+```
+
+
+### 2. Metropolis-Hastings MCMC
+
+Following this post: https://darrenjw.wordpress.com/2010/08/15/metropolis-hastings-mcmc-algorithms/
+
+The proposed kernel/density is symmetric i.e. P(a->b) = P(b->a), then the acceptance rate becomes $\frac{\pi(\theta_{t+1})q(\theta_t|\theta_{t+1})}{\pi(\theta_{t})q(\theta_{t+1}|\theta_t)} = \frac{\pi(\theta_{t+1})}{\pi(\theta_{t})}$
+```{r}
+# Case1:the Metropolis method
+# for the standard normal distribution using innovations/residuals from a U(-eps,eps)
+metrop1 = function(n=1000, eps=0.5){
+  vec = vector('numeric',n)
+  x = 0
+  vec[1] = x
+  for (i in 2:n){
+    innov = runif(1, -eps, eps)
+    candidate = x + innov # a candidate value
+    acceptance_prob = min(1, dnorm(candidate)/ dnorm(x))
+    u = runif(1)
+    if (u < acceptance_prob)
+      x = candidate
+    vec[i] = x
+  }
+  return(vec)
+}
+
+plot.mcmc<-function(mcmc.out)
+{
+    op=par(mfrow=c(2,2))
+    plot(ts(mcmc.out),col=2)
+    hist(mcmc.out,30,col=3)
+    qqnorm(mcmc.out,col=4)
+    abline(0,1,col=2)
+    acf(mcmc.out,col=2,lag.max=100)
+    par(op)
+}
+ 
+metrop.out = metrop1(3000,1)
+plot.mcmc(metrop.out)
+```
+
+
+
+
+
+

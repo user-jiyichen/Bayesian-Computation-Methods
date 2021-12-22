@@ -1,0 +1,77 @@
+---
+title: "ABC"
+author: "Yichen Ji"
+date: "29/10/2021"
+output: html_document
+---
+
+```{r}
+library(abc)
+library(abc.data)
+library(EasyABC)
+```
+
+1. A way of Normal parameter inference
+```{r}
+normal_start_time = proc.time()
+
+# read and sort data having 30 observations from a Normal distribution with unknown mean and variance
+dat = as.vector(read.table('data.txt', header=F))
+dat = sort(dat[,1])
+
+# setup number of simulations and number of parameters to save
+reps = 50000
+save = 100
+dist_val = rep(NA, reps)
+
+# draw parameter values from the uniform prior
+tmp_mean = runif(reps, -20, 20)
+tmp_variance = runif(reps, 0, 50)
+
+# simulate 50000 artificial data from the Normal likelihood and compare with the observed data
+for (i in 1:reps){
+  
+  # simulate from the likelihood
+  tmp_dat = rnorm(length(dat), tmp_mean[i], sqrt(tmp_variance[i]))
+  tmp_dat = sort(tmp_dat)
+  
+  # calculate Euclidean distance(here using the no summary stat just use data itself)
+  dist_val[i] = dist(rbind(dat, tmp_dat))
+}
+
+# sort distance values(summary statistics) and keep the indexes
+dist_indexes = sort(dist_val, index.return=T)
+
+# get the indexed of the top 30 values in the sorted list
+save_indexes = dist_indexes$ix[1:save]
+
+### PROBLEM: this method doesn't set the threshold epsilon
+
+# get the corresponding parameter values the the lowest distances from the observed data
+saved_means = tmp_mean[save_indexes]
+saved_variance = tmp_variance[save_indexes]
+
+normal_total_time = proc.time() - normal_start_time
+
+res = data.frame(Parameter=c('Normal Mean', 'Normal Variance'),
+                 Mean=c(mean(saved_means), mean(saved_variance)),
+                 SD=c(sd(saved_means), sd(saved_variance)))
+
+knitr::kable(res, digits=3)
+```
+
+```{r}
+# Plot the posterior distributions for the mean and variance
+par(mfrow=c(1,2))
+hist(saved_means, main = 'Mean',
+     xlab = expression(hat(mu)), ylab='', breaks=10)
+abline(v=mean(saved_means), col='blue', lty='dashed', lwd=2)
+
+hist(saved_variance, main = 'Variance', 
+     xlab=expression(hat(sigma)^2),ylab='', breaks=10)
+abline(v=mean(saved_variance),col='blue', lty='dashed', lwd=2)
+
+### PROBLEM: not knowing the true parameter value, cannot compare performance
+```
+
+

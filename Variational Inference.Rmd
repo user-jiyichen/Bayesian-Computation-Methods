@@ -1,0 +1,519 @@
+---
+title: "VI"
+author: "Yichen Ji"
+date: "18/11/2021"
+output: html_document
+---
+```{r}
+rm(list = ls())
+library(mvtnorm)  # for multivariate normal density
+library(pracma)   # for 2d-integral, sqrtm
+library(ggplot2)  # for plotting
+library(tidyverse)
+```
+
+Logistic likelihood and Gaussian priors
+
+Reference to the paper 'Conditionally conjugate mean–field variational Bayes for logistic models'
+by Daniele Durante and Tommaso Rigon
+
+MCMC as benchmark to compare
+
+more covariates e.g. 5?
+
+number of MCMC samples per replication = 5000
+number of replications = 200
+
+compare MSE of different methods
+
+```{r}
+# true parameter values i.e. betas
+beta = c(1,1,1,1,1)
+
+# prior hyperparameters
+prior = list(mu = rep(0,5), Sigma = diag(1,5)) # zero mean and identity covariance matrix
+
+# Variational Inference(SVI) parameter settings
+iter = 5000 # number of iterations
+tau = 1 # delay 
+kappa = 0.75 # forgetting rate
+```
+
+```{r}
+set.seed(123)
+
+n = 20 # sample size
+x1 = runif(n, -1, 1)
+x2 = runif(n, -1, 1)
+x3 = runif(n, -1, 1)
+x4 = runif(n, -1, 1)
+X = cbind(1, x1,x2,x3,x4) # the design matrix including the intercept
+y = rbinom(n, 1, prob = plogis(X %*% beta))
+```
+
+use the quardratic lower bound proposed from Jaakkola and Jordan (2000)
+
+```{r}
+logit_CAVI = function(X,y,prior,tol = 1e-16, maxiter=10000){
+  if (is.null(n = nrow(X))) stop("'X' should be a matrix, not a vector")
+  
+  # compute the log-determinant of a matrix
+  ldet = function(X){
+    if(!is.matrix(X)) return(log(X))
+    determinant(X, logarithm = T)$modulus
+  }
+  
+  lowerbound = numeric(maxiter) # ELBO
+  p = ncol(X) # number of betas
+  
+  P = solve(prior$Sigma)
+  mu = prior$mu
+  Pmu = c(P %*% mu)
+  Pdet = ldet(P)
+  
+  # initialization for omega = 0.25
+  P_vb = crossprod(X*rep(0.25, n), X) + P
+  Sigma_vb = solve(P_vb)
+  mu_vb = Sigma_vb %*% (crossprod(X, y - 0.5) + Pmu)
+  eta = c(X %*% mu_vb)
+  xi = sqrt(eta^2 + rowSums(X %*% Sigma_vb * X))
+  omega = tanh(xi/2) / (2 * xi)
+  omega[is.nan(omega)] = 0.25
+  
+  lowerbound[1] = 0.5*p + 0.5*ldet(Sigma_vb) + 0.5*Pdet -
+    0.5*t(mu_vb - mu)%*%P%*%(mu_vb - mu) +
+    sum((y-0.5)*eta +log(plogis(xi)) - 0.5*xi) -
+    0.5*sum(diag(P %*% Sigma_vb))
+  
+  # iterative procedure
+  for (t in 2:maxiter){
+    P_vb = crossprod(X*omega, X) + P
+    Sigma_vb = solve(P_vb)
+    mu_vb = Sigma_vb %*% (crossprod(X, y - 0.5) + Pmu)
+    
+    # update xi
+    eta = c(X %*% mu_vb)
+    xi = sqrt(eta^2 + rowSums(X %*% Sigma_vb * X))
+    omega = tanh(xi/2) / (2 * xi)
+    omega[is.nan(omega)] = 0.25
+    
+    lowerbound[t] = 0.5*p + 0.5*ldet(Sigma_vb) + 0.5*Pdet 
+    - 0.5*t(mu_vb - mu)%*%P%*%(mu_vb - mu) + sum((y-0.5)*eta +
+                                                   log(plogis(xi)) - 0.5*xi) - 
+      0.5*sum(diag(P %*% Sigma_vb))
+    
+    if(abs(lowerbound[t] - lowerbound[t-1]) < tol) 
+      return(list(mu = matrix(mu_vb,p,1),
+                  Sigma = matrix(Sigma_vb,p,p),
+                  Convergence = cbind(Iteration=(1:t)-1,
+                                      Lowerbound=lowerbound[1:t]), 
+                  xi=xi))
+  }
+  stop("The algorithm has not reached convergence")
+}
+```
+
+```{r}
+set.seed(123)
+
+CAVI_output = logit_CAVI(X = X, y = y, prior = prior)
+
+# Posterior distribution of the intercept with CAVI
+beta0_CAVI = rnorm(iter, CAVI_output$mu[1], sqrt(CAVI_output$Sigma[1,1])) 
+
+# Posterior distribution of the slope with CAVI
+beta1_CAVI = rnorm(iter, CAVI_output$mu[2], sqrt(CAVI_output$Sigma[2,2])) 
+
+beta2_CAVI = rnorm(iter, CAVI_output$mu[3], sqrt(CAVI_output$Sigma[3,3]))
+
+beta3_CAVI = rnorm(iter, CAVI_output$mu[4], sqrt(CAVI_output$Sigma[4,4]))
+
+beta4_CAVI = rnorm(iter, CAVI_output$mu[5], sqrt(CAVI_output$Sigma[5,5]))
+
+# Posterior distribution of the intercept with SVI
+# beta0_SVI  <- rnorm(10^4, SVI_output$mu[1], sqrt(SVI_output$Sigma[1,1]))   
+
+# Posterior distribution of the slope with SVI
+# beta1_SVI  <- rnorm(10^4, SVI_output$mu[2], sqrt(SVI_output$Sigma[2,2]))   
+
+data_plot = data.frame(Posterior = c(beta0_CAVI,beta1_CAVI,beta2_CAVI,beta3_CAVI,beta4_CAVI), 
+                       beta = rep(c("beta0","beta1",'beta2','beta3','beta4'),each=iter), 
+                       Algorithm = rep(c("CAVI"),each=5*iter), 
+                       Sample_size = n)
+```
+
+```{r}
+round = 200
+sample_mean = data.frame(beta0=double(),beta1=double(),beta2=double(),beta3=double(),beta4=double())
+sample_var = data.frame(beta0=double(),beta1=double(),beta2=double(),beta3=double(),beta4=double())
+
+i=1
+while(i <= round){
+  CAVI_output = logit_CAVI(X = X, y = y, prior = prior)
+  
+  beta0 = rnorm(iter, CAVI_output$mu[1], sqrt(CAVI_output$Sigma[1,1]))
+  mean_beta0 = mean(beta0)
+  var_beta0 = var(beta0)
+  
+  beta1 = rnorm(iter, CAVI_output$mu[2], sqrt(CAVI_output$Sigma[2,2]))
+  mean_beta1 = mean(beta1)
+  var_beta1 = var(beta1)
+  
+  beta2 = rnorm(iter, CAVI_output$mu[3], sqrt(CAVI_output$Sigma[3,3]))
+  mean_beta2 = mean(beta2)
+  var_beta2 = var(beta2)
+  
+  beta3 = rnorm(iter, CAVI_output$mu[4], sqrt(CAVI_output$Sigma[4,4]))
+  mean_beta3 = mean(beta3)
+  var_beta3 = var(beta3)
+  
+  beta4 = rnorm(iter, CAVI_output$mu[5], sqrt(CAVI_output$Sigma[5,5]))
+  mean_beta4 = mean(beta4)
+  var_beta4 = var(beta4)
+  
+  sample_mean = add_row(sample_mean, beta0 = mean_beta0,
+                          beta1 = mean_beta1,
+                          beta2 = mean_beta2,
+                          beta3 = mean_beta3,
+                          beta4 = mean_beta4)
+  sample_var = add_row(sample_var, beta0 = var_beta0,
+                          beta1 = var_beta1,
+                          beta2 = var_beta2,
+                          beta3 = var_beta3,
+                          beta4 = var_beta4)
+  i = i+1
+}
+
+# mean-squared error of each round for each beta
+MSE = (sample_mean - beta)^2 + sample_var
+round_mean_MSE = sapply(MSE, mean)
+round_mean_MSE
+```
+
+
+```{r}
+ggplot(data=data_plot, 
+       aes(x = as.factor(Sample_size), 
+           y = Posterior, fill=Algorithm)) +
+  facet_grid(~beta) + 
+  geom_boxplot(alpha=0.7) + 
+  theme_bw() + 
+  scale_fill_grey() + 
+  geom_hline(yintercept=1, linetype="dotted") + 
+  xlab("Sample size") + 
+  ylab("Logistic Regression Coefficient")
+
+```
+```{r}
+nn <- c(1000, 5000, 10000) # setting the sample size
+data_plots = data.frame()
+for(n in nn){
+  set.seed(123)      # Set the seed to make this experiment reproducible
+  x1 <- runif(n,-1,1)
+  x2 <- runif(n,-1,1)
+  x3 <- runif(n,-1,1)
+  x4 <- runif(n,-1,1)
+  X <- cbind(1,x1,x2,x3,x4)    
+  y <- rbinom(n,1,prob = plogis(X%*%beta))
+
+  set.seed(1010)     # Set the seed to make this experiment reproducible
+  CAVI_output <- logit_CAVI(X = X, y = y, prior = prior) # CAVI 
+  
+  #SVI_output  <- logit_SVI(X = X, y = y,  prior = prior,  
+                           #iter = iter, tau = tau, kappa = kappa) # SVI
+
+  set.seed(100)
+  
+  # Posterior distribution of the intercept with CAVI
+  beta0_CAVI <- rnorm(10^4, CAVI_output$mu[1], sqrt(CAVI_output$Sigma[1,1]))
+  
+  # Posterior distribution of the slope with CAVI
+  beta1_CAVI <- rnorm(10^4, CAVI_output$mu[2], sqrt(CAVI_output$Sigma[2,2])) 
+  
+  beta2_CAVI = rnorm(10^4, CAVI_output$mu[3], sqrt(CAVI_output$Sigma[3,3]))
+
+  beta3_CAVI = rnorm(10^4, CAVI_output$mu[4], sqrt(CAVI_output$Sigma[4,4]))
+
+  beta4_CAVI = rnorm(10^4, CAVI_output$mu[5], sqrt(CAVI_output$Sigma[5,5]))
+  
+  # Posterior distribution of the intercept with SVI
+  #beta0_SVI  <- rnorm(10^4, SVI_output$mu[1], sqrt(SVI_output$Sigma[1,1]))  
+  
+  # Posterior distribution of the slope with SVI
+  #beta1_SVI  <- rnorm(10^4, SVI_output$mu[2], sqrt(SVI_output$Sigma[2,2]))   
+
+  data_plots <- rbind(data_plots,data.frame(Posterior = c(beta0_CAVI,beta1_CAVI,
+                                                         beta2_CAVI, beta3_CAVI, beta4_CAVI),
+                                          beta = rep(rep(c("beta0","beta1",'beta2','beta3','beta4'),
+                                                         each=10^4),5), 
+                                          Algorithm = rep(c("CAVI"),
+                                                          each=5*10^4), 
+                                          Sample_size = n))
+}
+```
+
+```{r}
+ggplot(data=data_plots, 
+       aes(x = Posterior, color = beta, fill=beta)) + 
+  geom_histogram(alpha=0.5,binwidth = 0.005)+
+  facet_wrap(~Sample_size,ncol = 1)+
+  theme_minimal()+
+  geom_vline(aes(xintercept = 1))
+```
+```{r}
+# color divide by sample size for each beta
+ggplot(data=data_plots, 
+       aes(x = Posterior, color = Sample_size)) + 
+  geom_histogram(alpha=0.5,binwidth = 0.005)+
+  facet_wrap(~beta,ncol = 1)+
+  theme_minimal()+
+  geom_vline(aes(xintercept = 1))
+```
+
+
+```{r}
+ggplot(data=data_plots, 
+       aes(x = as.factor(Sample_size), 
+           y = Posterior, fill=Algorithm)) + 
+  facet_grid(~beta) + 
+  geom_boxplot(alpha=0.7) + 
+  theme_bw() + 
+  scale_fill_grey() + 
+  geom_hline(yintercept=1, linetype="dotted") + 
+  xlab("Sample size") + 
+  ylab("Regression Coefficient")
+
+```
+
+
+```{r}
+### KL Divergence
+KL = function(p,q,low = -Inf, up = Inf){
+  f = function(x) p(x)*(p(x,T)-q(x,T)) # T means taking logarithm
+  integrate(f, lower = low, upper = up)
+}
+
+
+# KL between two normal distributions
+curve(dnorm(x), from = -9, to = 11) # mean = 0
+curve(dnorm(x,2), from = -9, to = 11, add = T, col = 2) # mean = 2
+p = function(x, lg=F) dnorm(x, log=lg)
+q = function(x, lg=F) dnorm(x, 2, log=lg)
+
+KL(p,q)
+KL(q,p)
+# in this case KL(p,q) = KL(q,p), but not in general
+
+
+# KL between normal and t distribution
+curve(dnorm(x), from = -5, to = 5)
+curve(dt(x,1), from = -5, to = 5, add = T, col=2)
+p = function(x, lg=F) dnorm(x, log=lg)
+q = function(x, lg=F) dt(x,1,log=lg)
+
+KL(p,q)
+```
+
+
+```{r}
+
+### Minimize KL-divergence between a correlated 2D Gaussian
+
+# 2D KL Divergence
+KL_2D = function(q,p){
+  f = function(x,y) q(x,y) * (q(x,y,T) - p(x,y,T))
+  integral2(f, -20, 20, -20, 20)$Q
+}
+
+
+# covariance matrix of the true posterior
+Sigma = matrix(c(1, 0.9, 0.9, 1), ncol = 2)
+
+# true posterior
+posterior = function(x, y, lg=F){
+  dmvnorm(matrix(c(x,y), ncol = 2), mean = rep(0,2), sigma = Sigma, log = lg)
+}
+
+# Sanity checks
+posterior(0,0)
+integral2(posterior, -10, 10, -10, 10)$Q
+```
+
+```{r}
+# Mean Field Variational Family i.e. product of approximate distributions
+# here the function form is still Normal
+
+# variance of two Gaussians as hyper-parameter
+s1 = 2
+s2 = 2
+
+
+qq = function(x,y,lg=F){
+  # independence assumption of mean-field
+  if(lg){
+    dnorm(x, 0, s1, log=lg) + dnorm(y, 0, s2, log=lg)
+  } else{
+    dnorm(x,0,s1)* dnorm(y,0,s2) 
+  }
+}
+
+# sanity check
+qq(0,0)
+integral2(qq, -10, 10, -10, 10)$Q
+
+# sum up the above into one function
+
+func = function(t){ # t contains separate variational parameters
+  qt = function(x,y,lg=F){
+    if(lg){
+      dnorm(x,0,t[1], log=T) + dnorm(y,0,t[2],log=T)
+    } else{
+      dnorm(x,0,t[1]) * dnorm(y,0,t[2])
+    }
+  }
+  KL_2D(qt,posterior)
+}
+
+func(c(0.4,0.9))
+```
+
+```{r}
+KL_2D(qq,posterior)
+KL_2D(posterior, qq)
+```
+
+```{r}
+# Plot the two distributions
+circleFun = function(center=c(0,0), diameter=1, npoints=100){
+  r = diameter / 2
+  tt = seq(0,2*pi,length.out = npoints)
+  xx = center[1] + r * cos(tt)
+  yy = center[2] + r * sin(tt)
+  return(data.frame(x = xx, y = yy))
+}
+
+plotCircle = function(s) {
+  dat = circleFun(c(0,0),4,npoints = 100) 
+  # represent the circle of 2*sigma of MVN(c(0,0), diag(1,1))
+  
+  dat1 = as.matrix(dat) %*% sqrtm(Sigma)$B  
+  # represents the posterior MVN(c(0,0), Sigma)
+  
+  dat2 = as.matrix(dat) %*% diag(s)
+  # represents the variational family MVN(c(0,0), diag(s1, s2))
+  
+  ggplot(as.data.frame(dat1),aes(x=V1,y=V2)) + theme_light() + 
+    ylim(-5,5) + xlim(-5,5) + 
+    xlab("x") +ylab("y") + 
+    geom_polygon(color="#2E9FDF", 
+                 fill="#2E9FDF", 
+                 alpha=0.3) +
+    geom_polygon(data=as.data.frame(dat2), 
+                 aes(x=V1,y=V2, color="#ff7d9d"), 
+                 fill="#ff7d9d", 
+                 alpha=0.3, 
+                 show.legend = F)
+}
+
+# Starting value - s1 = 1, s2 = 1
+plotCircle(c(1,1))
+
+# Minimize KL(q,post)
+fit = optim(par=c(1,1), fn=func, method="L-BFGS-B", lower=0)
+fit$par
+
+plotCircle(fit$par)
+```
+
+```{r}
+# know the posterior up to some normalizing constant
+NC = 0.5
+post.unk = function(x,y,lg=F) {
+  if (lg) {
+    log(NC) + posterior(x,y,T)
+  } else {
+    NC*posterior(x,y)
+  }
+}
+integral2(post.unk, -10, 10, -10, 10)$Q
+post.unk(0,0)
+KL_2D(qq, post.unk)
+
+# Wrap the q function so we can give it different values of sigma's and optimize it
+func2 = function(t) {
+  qt = function(x,y,lg=F) {
+    if (lg) {
+      dnorm(x,0,t[1],log=T) + dnorm(y,0,t[2],log=T)
+    } else {
+      dnorm(x,0,t[1])*dnorm(y,0,t[2])
+    }
+  }
+  KL_2D(qt, post.unk) # note that since we are giving it only the joint (unnormalized posterior)
+                   # this is equivalent to -ELBO
+}
+
+# optim finds the minimum, so using this finds the maximum of the ELBO
+fit = optim(par=c(1,1), fn=func2, method="L-BFGS-B", lower=0)
+fit$par
+
+plotCircle(fit$par)
+```
+
+
+```{r}
+# Variational Inference 
+# We want to minimize the KL divergence between two distributions
+# By using Gradient Descent/Ascent
+
+# Example: P(x) - Real ~ N(0,1)
+x = rnorm(100) # observed values
+# Q(x) - approximation ~ N(mu, sigma^2)
+# start with randomized values
+mu.0 = 5
+sigma.sq.0 = 3
+# KL(P||Q) = E[log P(x)] - E[log Q(x)]  (E w.r.t. P) we want to minimize this
+# 1st term doesn't depend on parameters so we want to maximize 2nd term
+# Gradient (w.r.t. mu and sigma^2) comes into the expectations
+# Approximate E with sample average
+# ( KL(Q||P) wouldn't work, as we don't have any way to approximate P(x) )
+logQ = function(x, mu, sigma.sq) {
+  -.5*log(2*pi)-.5*log(sigma.sq)-.5*(x-mu)^2/sigma.sq
+}
+dlogQ.dMu = function(x, mu, sigma.sq) {
+  (x-mu)/sigma.sq
+}
+dlogQ.dS = function(x, mu, sigma.sq) {
+  .5*((x-mu)/sigma.sq)^2-1/(2*sigma.sq)
+}
+
+# Gradient ascent
+ls = 0.5 # learning step
+mu.t = mu.0
+sigma.sq.t = sigma.sq.0
+tol = 1e-4
+step.mu = step.sigma = 1
+while((abs(step.mu) > tol) || (abs(step.sigma) > tol)) {
+  step.mu = ls*mean(dlogQ.dMu(x, mu.t, sigma.sq.t))
+  mu.t = mu.t + step.mu
+  step.sigma = ls*mean(dlogQ.dS(x, mu.t, sigma.sq.t))
+  sigma.sq.t = sigma.sq.t + step.sigma
+}
+
+curve(dnorm(x,mu.t,sqrt(sigma.sq.t)), from=-3, to=3)
+curve(dnorm(x),from=-3, to=3, add=T, col=2)
+
+# results are equal to the Maximum-Likelihood estimators
+n = length(x)
+c(mean(x), mu.t)
+c(var(x)*(n-1)/n, sigma.sq.t)
+```
+
+
+
+
+
+
+
+
+
+

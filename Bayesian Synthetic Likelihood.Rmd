@@ -1,0 +1,84 @@
+---
+title: "Bayesian Synthetic Likelihood"
+author: "Yichen Ji"
+date: "10/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(BSL)
+library(mvtnorm)
+```
+
+use the sum of binary data as the summary statistics and assume it follows a multi-normal distribution whose parameters $\mu$ and $\Sigma$ can be estimated by simulating n iid data sets of size N from the model based on $\beta$ and fitting the auxiliary likelihood to the summary statistics$s_{1:n}$
+
+```{r}
+run_MCMC_Synthetic = function(startvalue, iterations){
+  chain = array(dim = c(iterations + 1, 2))
+  chain[1,] = startvalue
+  
+  for (i in 1:iterations){
+    # proposal function
+    proposal = 
+      
+    # simulate data
+    simulatedData = matrix(NA, nrow = , ncol = )
+    for (i in 100){
+      
+    }
+  }
+}
+```
+
+```{r}
+set.seed(1)
+# number of simulations/ iterations
+num_sim = 5000
+
+# number of data in each simulation
+dim_data = 10
+
+# true parameter value of the logistic regression(5 covariates)
+observed_beta = c(1, 1, 1, 1, 1)
+
+sim_logistic_data = function(n = dim_data, beta) {
+x1 = runif(n, -1, 1);x2 = runif(n, -1, 1);x3 = runif(n, -1, 1);x4 = runif(n, -1, 1)
+
+# the design matrix including the intercept
+X = cbind(1, x1,x2,x3,x4) 
+
+y = rbinom(n, 1, prob = plogis(X %*% beta))
+return(y)}
+
+y0 = sim_logistic_data(dim_data,observed_beta)
+y0
+```
+
+
+```{r}
+# bsl library
+model = newModel( sim_logistic_data,
+                  fnSum = sum,
+                  theta0 = c(1,1,1,1,1),
+                  simArgs = list(n=dim_data),
+                  fnLogPrior = rlnorm
+                  )
+
+result = bsl(y=y0,n=5000,M=200,
+    model = model,
+    covRandWalk = diag(5),
+    method = 'BSL',
+    verbose = TRUE
+    )
+show(result)
+```
+
+
+```{r}
+library(matconv)
+```
+
+```{r}
+
+```
+

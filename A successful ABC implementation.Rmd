@@ -1,0 +1,212 @@
+---
+title: "Untitled"
+author: "Yichen Ji"
+date: "30/10/2021"
+output: html_document
+---
+
+```{r}
+rm(list = ls())
+set.seed(123) ## makes results reproducible 
+
+## Computing target sample and summary stats. This is from N(1.5, 1)
+target.sample <- rnorm(50, 1.5, 1)
+target.summary <- c(mean(target.sample), var(target.sample))
+
+## Computing candidate sample from U[0,3]
+candidate.sample <- runif(10000, 0, 3)
+
+candidate.means <- numeric()
+
+## Computing 10000 sample means with n=25
+for (i in 1:length(candidate.sample)) {
+  candidate.means <- c(candidate.means, mean(rnorm(25, candidate.sample[i], 2)))
+}
+
+## Set of 10 rejection radii that are tested, between 0 and 4
+rejection.radii <- c(4,2,1,0.5,0.25,0.125, 0.05,0.025, 0.0125, 0.005)
+
+####################################################### First Approach ########################################
+## Squared Difference Used for Discrepancy Measure
+
+## Vector holding the MSEs corrsponding to each radius
+mean.squared.error <- numeric()
+
+for (i in 1:length(rejection.radii)) {
+  deviation <- numeric()
+  accepted <- c()
+  
+  for (j in 1:length(candidate.means)) {
+    deviation <- c(deviation, (candidate.means[j] - target.summary[1])^2) 
+    if (deviation[j] >= rejection.radii[i]) { ## Accept/Reject criteria based on deviation
+      accepted <- c(accepted, "NO")
+    } else {
+      accepted <- c(accepted, "YES")
+    }
+  }
+  
+  complete.sample <- data.frame(candidate.means, deviation, accepted)
+  print(length(accepted[accepted == "YES"]))
+  
+  mse <- sum(complete.sample[complete.sample$accepted == "YES", 2])/length(accepted[accepted == "YES"])
+  print(mse)
+  mean.squared.error <- c(mean.squared.error, mse)
+}
+
+## Visualizing radii and MSEs to determine optimal radius
+plot(rejection.radii, mean.squared.error)
+
+## The plot doesn't make the minimum very easy to identify
+## It looks like 0.005 might be an acceptable radius for this problem
+## Computing Final Sample
+
+accepted.final <- numeric()
+deviation.final <- numeric() 
+
+for (j in 1:length(candidate.means)) {
+  deviation.final <- c(deviation.final, (candidate.means[j] - target.summary[1])^2)
+  if (deviation.final[j] >= 0.005) {
+    accepted.final <- c(accepted.final, "NO")
+  } else {
+    accepted.final <- c(accepted.final, "YES")
+  }
+}
+
+complete.sample.final <- data.frame(candidate.means, deviation.final, accepted.final)
+print(length(accepted.final[accepted.final == "YES"]))
+print(mean(complete.sample.final[complete.sample.final$accepted.final == "YES", 1]))
+
+## 491 values accepted
+## Mean of 1.5334
+## Radius is 0.005
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+rm(list = ls())
+set.seed(123) # make reproducible output
+
+# set target distribution and parameter
+target.sample = rnorm(50, 1.5, 1)
+# set the function form of summary statistics
+target.summary <- c(mean(target.sample), var(target.sample))
+
+# draw parameter samples from prior Uniform[0,3]
+candidate.sample = runif(10000, 0, 3)
+
+candidate.means = numeric()
+
+# compute 10000 sample means with n=50
+for (i in 1:length(candidate.sample)){
+  candidate.means = c(candidate.means, mean(rnorm(50, candidate.sample[i], 1)))
+}
+
+threshold = c(2, 1, 0.5, 0.25, 0.125, 0.1, 0.05, 0.025, 0.0125, 0.005)
+
+mean.squared.error = numeric()
+
+for (i in 1: length(threshold)){
+  deviation = numeric()
+  accepted = c()
+  
+  for (j in 1:length(candidate.means)){
+  
+    # the squared error
+    deviation = c(deviation,(candidate.means[j] - target.summary[1])^2)
+    
+    # accept-reject step
+    if (deviation[j] < threshold[i]){
+      accepted = c(accepted, 'YES')
+    } else {
+      accepted = c(accepted, 'NO')
+    }
+  }
+
+  # count the number of accepted parameter
+  complete.sample = data.frame(candidate.means, deviation, accepted)
+  print(length(accepted[accepted == 'YES']))
+
+  # compute the mean squared error of all parameter samples
+  mse <- sum(complete.sample[complete.sample$accepted == "YES", 2])/length(accepted[accepted == "YES"])
+  print(mse)
+  mean.squared.error <- c(mean.squared.error, mse)
+}
+```
+
+
+```{r}
+## Visualizing radii and MSEs to determine optimal radius
+plot(threshold, mean.squared.error)
+
+## The plot doesn't make the minimum very easy to identify
+## It looks like 0.005 might be an acceptable radius for this problem
+## Computing Final Sample
+
+accepted.final <- numeric()
+deviation.final <- numeric() 
+
+for (j in 1:length(candidate.means)) {
+  deviation.final <- c(deviation.final, (candidate.means[j] - target.summary[1])^2)
+  if (deviation.final[j] >= 0.005) {
+    accepted.final <- c(accepted.final, "NO")
+  } else {
+    accepted.final <- c(accepted.final, "YES")
+  }
+}
+
+complete.sample.final <- data.frame(candidate.means, deviation.final, accepted.final)
+print(length(accepted.final[accepted.final == "YES"]))
+print(mean(complete.sample.final[complete.sample.final$accepted.final == "YES", 1]))
+```
+
+```{r}
+## Absolute Value Used For Discrepancy Measure
+
+## Vector holding the MAE for each radius
+mean.squared.error.abs <- numeric()
+
+for (i in 1:length(threshold)) {
+  accepted.abs <- c()
+  absolutediff <- numeric()
+  
+  for (j in 1:length(candidate.means)) {
+    absolutediff <- c(absolutediff, abs(candidate.means[j] - target.summary[1]))
+    if (absolutediff[j] >= threshold[i]) { ## Accept/Reject criteria based on absolute difference
+      accepted.abs <- c(accepted.abs, "NO")
+    } else {
+      accepted.abs <- c(accepted.abs, "YES")
+    }
+  }
+  
+  complete.sample.abs <- data.frame(candidate.means, absolutediff, accepted.abs)
+  print(length(accepted.abs[accepted.abs == "YES"]))
+  
+  mse.abs <- sum(complete.sample.abs[complete.sample.abs$accepted.abs == "YES", 2])/length(accepted.abs[accepted.abs == "YES"])
+  print(mse.abs)
+  mean.squared.error.abs <- c(mean.squared.error.abs, mse.abs)
+}
+
+## Visualizing the MAE against the rejection radii to determine optimal radius
+plot(threshold, mean.squared.error.abs)
+
+## Again, the plot is relatively inconclusive
+## It looks like 0.005 might be a reasonable radius for this problem (need a small radius)
+
+accepted.abs.final <- numeric()
+absolutediff.final <- numeric() 
+
+for (j in 1:length(candidate.means)) {
+  absolutediff.final <- c(absolutediff.final, abs(candidate.means[j] - target.summary[1]))
+  if (absolutediff.final[j] >= 0.005) {
+    accepted.abs.final <- c(accepted.abs.final, "NO")
+  } else {
+    accepted.abs.final <- c(accepted.abs.final, "YES")
+  }
+}
+
+complete.sample.abs.final <- data.frame(candidate.means, absolutediff.final, accepted.abs.final)
+print(length(accepted.abs.final[accepted.abs.final == "YES"]))
+print(mean(complete.sample.abs.final[complete.sample.abs.final$accepted.abs.final == "YES", 1]))
+
+```
+

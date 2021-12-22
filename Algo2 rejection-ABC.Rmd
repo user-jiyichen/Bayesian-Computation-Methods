@@ -1,0 +1,47 @@
+---
+title: "Untitled"
+author: "Yichen Ji"
+date: "30/10/2021"
+output: html_document
+---
+
+2. Another way of Normal parameter inference inmitating the first paper
+```{r}
+# the target distribution is Normal with mean = 4.3 and std = 2.7
+
+# target data y
+data =  rnorm(100, mean = 4.3, sd = 2.7) 
+
+# Algo2: Likelihood-free rejection sampler 2
+ABC_acceptance = function(iteration, tolerance_level,sample_size){
+  accepted = data.frame()
+  for(i in 1:iteration){
+    repeat{
+      # generate theta' from the prior Unif(0,10)
+      theta = runif(1,0,10)
+      
+      # generate z from the likelihood f
+      samples = rnorm(sample_size, mean = theta, sd = 1) 
+      
+      # use absolute difference as the distance between observed and actual summary statistics
+      # use mean and variance as summary statistics
+      diffmean = abs(mean(samples) - mean(data))
+      
+      if(diffmean <=tolerance_level){
+        break
+      }
+    accepted = rbind(accepted,theta)  
+  }
+  }
+  return(accepted)
+}
+```
+
+
+```{r}
+# get a realization using Algo2 from the approximate posterior
+ABC_acceptance(iteration = 2000, tolerance_level= 0.01, sample_size = 1000)
+z0 = rnorm(10000, mean = theta0[1], sd = theta0[2])
+hist(z0, breaks = 100)
+```
+
